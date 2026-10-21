@@ -71,8 +71,8 @@ testes do modelo e do leitor de blocos não precisam de hardware.
 ```python
 @dataclass(frozen=True, slots=True)
 class AudioData:
-    samples: Samples      # NDArray[float32], formato (frames, canais)
-    samplerate: int       # Hz
+    samples: Samples  # NDArray[float32], formato (frames, canais)
+    samplerate: int  # Hz
 ```
 
 Invariantes verificadas em `__post_init__`:

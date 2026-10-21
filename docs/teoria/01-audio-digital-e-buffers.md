@@ -185,8 +185,8 @@ detalha quantos underruns ocorreram.
 
 ```python
 data.samples.shape  # (frames, channels)
-data.frames         # número de frames
-data.channels       # número de canais
+data.frames  # número de frames
+data.channels  # número de canais
 ```
 
 O `BlockReader` mantém uma posição inteira e preenche o buffer de saída:
