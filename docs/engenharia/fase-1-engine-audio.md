@@ -331,12 +331,14 @@ Execução em 2026-10-21, com Python 3.12.3:
 | ruff | 0.17.1 |
 | mypy | 2.4.0 |
 
-A reprodução real não foi executada neste ambiente. O teste manual recomendado
-é:
+A reprodução real foi validada no dispositivo padrão (`default, ALSA`) com:
 
 ```bash
-harmoniac demo --frequency 440 --duration 2
+harmoniac demo --frequency 440 --duration 0.5 --amplitude 0.1
+harmoniac play /tmp/opencode/harmoniac_teste.wav
 ```
+
+Ambos os comandos terminaram com código 0.
 
 ## 10. Limitações conhecidas
 
@@ -349,14 +351,16 @@ harmoniac demo --frequency 440 --duration 2
   latência de saída.
 - **Status agregado:** `had_status` apenas indica que houve algum aviso; não
   conta underruns/overruns.
-- **Sem teste com hardware:** os testes usam `FakeStream`; a reprodução real
-  precisa ser validada manualmente.
+- **Teste de hardware manual:** os testes automatizados usam `FakeStream`; a
+  reprodução real foi validada manualmente no dispositivo padrão, mas ainda não
+  faz parte da suíte automatizada.
 - **Cobertura parcial do CLI:** os caminhos `demo` e `play` não são exercitados
   por testes automatizados porque dependem de áudio.
 
 ## 11. Próximos passos
 
-1. Validar a reprodução real em um dispositivo de saída.
+1. Adicionar um teste de integração opcional, executado apenas quando houver
+   dispositivo de áudio disponível.
 2. Iniciar a Fase 2: mixer multicanal, ganhos e Clear Tracks.
 3. Adicionar seleção de dispositivo e tratamento de sample rate.
 4. Evoluir o `AudioPlayer` para múltiplas fontes no mesmo callback.
