@@ -23,6 +23,12 @@ correspondente e registramos, em novas notas, o que foi aprendido.
 | ES879 (4) | Fourier, Parseval, DTFT, resposta em frequência, filtros, deconvolução | `dsp` | Análise espectral, EQ, separação, phase vocoder, inversão |
 | ES879 (5) | DFT/IDFT, resolução, zero padding, FFT, leakage, janelamento, convolução circular | `dsp` | STFT para BPM/onsets, escolha de janelas, frames/hop, processamento em blocos |
 
+## Notas complementares
+
+- [01 — Áudio Digital e Buffers](01-audio-digital-e-buffers.md): amostragem,
+  quantização, frames, buffers, callback do `sounddevice` e formato WAV. Cobre
+  a lacuna de callbacks de áudio, buffers e underruns.
+
 ## Lacunas que precisamos cobrir
 
 As notas são a base, mas não cobrem todos os tópicos necessários. As novas notas
@@ -36,7 +42,8 @@ de `docs/teoria/` devem explicar, no mínimo:
 - HPSS (Harmonic-Percussive Source Separation);
 - alinhamento forçado (forced alignment) com Whisper;
 - arquitetura do Demucs e separação de stems;
-- callbacks de áudio, buffers e underruns com `sounddevice`;
+- ~~callbacks de áudio, buffers e underruns com `sounddevice`~~ (coberto na
+  nota 01);
 - `QThread`, sinais/slots e timers no PyQt6;
 - reamostragem e filtros anti-aliasing;
 - janelamento e leakage na prática.
@@ -44,7 +51,8 @@ de `docs/teoria/` devem explicar, no mínimo:
 ## Trilha sugerida
 
 1. **Fase 0:** empacotamento, estrutura e convenções.
-2. **Fase 1:** revisar ES879 (1) e (2); buffers e reprodução com `sounddevice`.
+2. **Fase 1:** revisar ES879 (1) e (2); buffers e reprodução com `sounddevice`
+   (concluída; ver nota 01).
 3. **Fase 2:** revisar ES879 (2); mixer, ganhos e Clear Tracks.
 4. **Fase 3:** estudar `QThread`, sinais/slots e ciclo de vida da UI.
 5. **Fase 4:** revisar ES879 (4) e (5); STFT, onsets e BPM com librosa.
