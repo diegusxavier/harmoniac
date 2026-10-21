@@ -35,6 +35,32 @@ reconstrói uma tensão contínua. No Harmoniac, o caminho de saída é feito pe
 `sounddevice`, que conversa com a API de áudio do sistema operacional
 (PortAudio).
 
+### 2.1. Do mundo físico ao `AudioData`
+
+A cadeia acima termina em “amostras digitais”. No software, precisamos de uma
+estrutura que diga não só quais são as amostras, mas também como interpretá-las.
+É aí que entra o `AudioData`.
+
+Um `AudioData` guarda:
+
+- uma matriz de amostras, no formato `(frames, canais)`;
+- a taxa de amostragem usada para gerar ou ler essas amostras.
+
+Sem a taxa de amostragem, a sequência de números é ambígua: os mesmos 44.100
+valores podem representar 1 segundo a 44,1 kHz, 0,919 segundo a 48 kHz ou
+2 segundos a 22,05 kHz. O `AudioData` amarra os dois dados, para que essa
+interpretação não se perca.
+
+Em outras palavras:
+
+```text
+som físico → ADC → amostras + sample rate → AudioData
+```
+
+A teoria desta nota explica **o que os números significam**. O modelo
+`AudioData` explica **como esses números e seu contexto viajam juntos pelo
+código**.
+
 ## 3. Amostragem e o teorema de Nyquist
 
 Um sinal contínuo $x(t)$ é amostrado em intervalos regulares $T_s$:
@@ -168,7 +194,38 @@ Blocos menores reduzem a latência, mas aumentam a frequência de callbacks e o
 risco de **underrun**. Blocos maiores são mais eficientes, mas aumentam a
 latência. A Fase 1 usa 1024 frames como padrão.
 
-### 5.1. Underrun e overrun
+### 5.1. Um exemplo concreto: 4 frames estéreo
+
+Considere quatro frames de áudio estéreo. Cada frame tem uma amostra da esquerda
+(L) e uma da direita (R):
+
+```text
+frame 0: [L0, R0]
+frame 1: [L1, R1]
+frame 2: [L2, R2]
+frame 3: [L3, R3]
+```
+
+Como matriz `(frames, canais)`, isso fica:
+
+```text
+[[L0, R0],
+ [L1, R1],
+ [L2, R2],
+ [L3, R3]]
+```
+
+A forma é `(4, 2)`:
+
+- 4 frames;
+- 2 canais;
+- 8 valores escalares.
+
+Se alguém dissesse apenas “oito amostras”, não saberíamos se são quatro frames
+estéreo, oito frames mono ou outra combinação. A noção de frame resolve essa
+ambiguidade.
+
+### 5.2. Underrun e overrun
 
 - **Underrun** (_underrun_): o dispositivo precisou de dados e o buffer estava
   vazio. O resultado típico é um estalo ou silêncio.
@@ -179,7 +236,7 @@ O callback do `sounddevice` recebe um argumento `status` que indica esses
 eventos. O `AudioPlayer` registra a ocorrência em `had_status`, mas ainda não
 detalha quantos underruns ocorreram.
 
-### 5.2. Buffer no código
+### 5.3. Buffer no código
 
 `AudioData.samples` é uma matriz com formato `(frames, canais)`:
 
@@ -198,6 +255,64 @@ reader.fill(outdata)
 Se o bloco pedido for maior que o restante do áudio, o leitor copia o que existe
 e completa o resto com zeros. Isso evita estalos no final e permite que o
 callback sempre receba um buffer cheio.
+
+### 5.4. Por que sample rate e samples andam juntos
+
+A sequência de amostras, sozinha, não determina a duração nem a frequência do
+som. O sample rate é parte da interpretação.
+
+Suponha um array com 44.100 amostras:
+
+- a 44.100 Hz, ele dura 1 segundo;
+- a 48.000 Hz, ele dura aproximadamente 0,919 segundo;
+- a 22.050 Hz, ele dura 2 segundos.
+
+O mesmo acontece com a frequência percebida. Uma senoide gerada para 440 Hz a
+44.100 Hz, se reproduzida a 48.000 Hz sem reamostragem, soa mais aguda, porque
+o mesmo padrão de amostras passa mais rápido pelo DAC.
+
+Por isso, `AudioData` carrega `samples` e `samplerate` juntos. O player abre o
+stream com o sample rate declarado; se o dispositivo não suportar essa taxa, a
+abertura pode falhar. Ainda não há reamostragem automática.
+
+### 5.5. O que acontece se frames e amostras forem confundidos
+
+Em mono, frames e amostras têm o mesmo número. Em estéreo, não:
+
+```text
+1024 frames estéreo = 1024 × 2 = 2048 amostras
+```
+
+Se um buffer estéreo de 1024 frames for tratado como um array 1D de 2048
+amostras, o código perde a noção de canal. Se for tratado como `(2, 1024)`, a
+orientação está invertida: o player espera `(frames, canais)`, não
+`(canais, frames)`.
+
+O resultado pode ser:
+
+- erro de forma no `AudioData`;
+- áudio tocado no canal errado;
+- apenas metade do áudio reproduzida;
+- estalos ou silêncio.
+
+Por isso o formato `(frames, canais)` é fixo no modelo e validado na criação.
+
+### 5.6. O contrato `AudioData`
+
+Do ponto de vista teórico, `AudioData` é um contrato com cinco garantias:
+
+1. as amostras estão em `float32`;
+2. a matriz tem duas dimensões, no formato `(frames, canais)`;
+3. há pelo menos um frame;
+4. há pelo menos um canal;
+5. o sample rate é positivo.
+
+Quem recebe um `AudioData` não precisa verificar isso de novo. Quem constrói
+precisa fornecer dados válidos; caso contrário, recebe `ValueError` na hora.
+
+O objeto é congelado (`frozen=True`), mas o array NumPy interno continua
+mutável. A convenção é não alterar `audio.samples` depois da criação. Essa
+distinção é importante: congelar o dataclass não congela o conteúdo do array.
 
 ## 6. O callback de áudio
 
@@ -304,6 +419,7 @@ Detalhes importantes:
 | Nyquist e aliasing | validação de `frequency_hz` em `generate_sine` |
 | Quantização | amostras `float32` normalizadas; `save_wav(subtype=...)` |
 | Frame e canal | `AudioData.samples.shape == (frames, channels)` |
+| Contrato de áudio | forma, dtype e sample rate juntos em `AudioData` |
 | Buffer/bloco | `BlockReader.fill`, `AudioPlayer(blocksize=1024)` |
 | Callback | função interna de `AudioPlayer.play` |
 | Underrun/overrun | `AudioPlayer.had_status` |
@@ -331,7 +447,18 @@ Detalhes importantes:
    `FLOAT` preserva melhor a precisão; para distribuição, `PCM_16` é mais
    compatível.
 
-## 10. Checklist
+## 10. Perguntas para fixar
+
+1. Por que 44.100 amostras não são suficientes para saber a duração do áudio?
+2. Em um bloco estéreo de 512 frames, quantas amostras escalares existem?
+3. O que acontece com uma senoide de 30 kHz amostrada a 44,1 kHz?
+4. Por que `AudioData` exige `float32`?
+5. Qual é a diferença entre `frames` e `channels`?
+6. Por que o callback não pode fazer I/O?
+7. O que é underrun e como o player registra isso?
+8. O que `frozen=True` garante e o que não garante?
+
+## 11. Checklist
 
 - [ ] A frequência está abaixo de `samplerate / 2`?
 - [ ] As amostras estão em `float32` e no formato `(frames, canais)`?
