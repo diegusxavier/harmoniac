@@ -8,11 +8,8 @@ gráfica, mixer, metrônomo ou análise musical.
 
 Quando dizemos “engine” nesta fase, não estamos falando de um sistema completo
 de produção musical. Estamos falando do conjunto mínimo de abstrações que
-permite:
-
-- descrever um bloco de áudio de forma inequívoca;
-- mover esse bloco para a saída de áudio do sistema;
-- testar o caminho de reprodução sem depender de hardware.
+permite descrever um bloco de áudio, movê-lo para a saída do sistema e testar
+esse caminho sem depender de hardware.
 
 Ao final desta fase, o projeto deve ser capaz de:
 
@@ -39,6 +36,7 @@ Este documento foca nas decisões de engenharia e na API implementada.
 - Injeção de stream para testes sem hardware.
 - CLI `harmoniac demo` e `harmoniac play`.
 - Testes unitários, lint, formatação e tipagem.
+- Roteiro de teste manual para validação auditiva.
 
 ### Fora do escopo
 
@@ -89,9 +87,11 @@ do dispositivo de áudio.
 Os módulos de `signal`, `wav` e `player` conhecem o modelo, mas não conhecem uns
 aos outros. O CLI é a camada que coordena tudo.
 
-## 4. O modelo `AudioData`
+## 4. API
 
-### 4.1. O problema que ele resolve
+### 4.1. `AudioData`
+
+#### O que é e por que existe
 
 Imagine que o player recebesse apenas um array NumPy:
 
@@ -116,33 +116,28 @@ dentro do callback de áudio, onde é difícil diagnosticar.
 validado no momento da criação. Depois que um `AudioData` existe, o restante do
 código pode confiar nas suas invariantes.
 
-### 4.2. O que ele é — e o que não é
+Em termos práticos, `AudioData` é:
 
-`AudioData` é um **objeto de valor** (_value object_): uma descrição pequena e
-autocontida de um bloco de áudio. Ele responde à pergunta:
-
-> “Que áudio é este?”
-
-Ele **não** responde:
-
-> “O que devo fazer com este áudio?”
+- um **objeto de valor** (_value object_): uma descrição pequena e autocontida
+  de um bloco de áudio;
+- um **contrato** entre quem produz áudio (`generate_sine`, `load_wav`) e quem
+  consome áudio (`AudioPlayer`, futuramente o mixer e a UI);
+- um lugar único para validar forma, dtype e sample rate.
 
 Uma analogia útil: `AudioData` é como a ficha técnica de um trecho de áudio. A
 ficha informa o formato, a taxa e os dados; ela não é o aparelho que reproduz o
 som.
 
-Essa distinção é intencional. `AudioData` não abre dispositivo, não toca, não lê
-arquivo, não faz resampling e não processa DSP. Essas responsabilidades ficam em
-outros módulos.
+#### O que ele não faz
 
-Em termos práticos, `AudioData` é:
+`AudioData` responde à pergunta “que áudio é este?”, não à pergunta “o que devo
+fazer com este áudio?”.
 
-- um contrato entre quem **produz** áudio (`generate_sine`, `load_wav`) e quem
-  **consome** áudio (`AudioPlayer`, futuramente o mixer e a UI);
-- um lugar único para validar forma, dtype e sample rate;
-- uma forma de evitar que funções recebam parâmetros soltos e inconsistentes.
+Ele não abre dispositivo, não toca, não lê arquivo, não faz resampling e não
+processa DSP. Essas responsabilidades ficam em outros módulos. Essa separação é
+intencional: o modelo permanece independente do dispositivo e fácil de testar.
 
-### 4.3. Anatomia
+#### Anatomia
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -176,7 +171,7 @@ A limitação de amplitude é responsabilidade de quem gera o sinal
 (`generate_sine`) ou de quem processa o áudio. O DAC pode clipar valores fora
 da faixa.
 
-### 4.4. Um exemplo concreto
+#### Exemplo concreto
 
 Suponha um segundo de silêncio estéreo a 44,1 kHz:
 
@@ -207,11 +202,9 @@ $$
 88200 \times 4 = 352800 \text{ bytes} \approx 345 \text{ KiB}
 $$
 
-Esse exemplo também mostra por que a forma importa. Um array 1D com 44.100
-valores não diz se é mono ou se é um estéreo “achatado”. O formato
-`(frames, canais)` elimina essa ambiguidade.
-
-Se tentarmos criar um `AudioData` com um array 1D:
+Um array 1D com 44.100 valores não diz se é mono ou se é um estéreo “achatado”.
+O formato `(frames, canais)` elimina essa ambiguidade. Se tentarmos criar um
+`AudioData` com um array 1D:
 
 ```python
 AudioData(samples=np.zeros(44100, dtype=np.float32), samplerate=44100)
@@ -239,7 +232,7 @@ AudioData(samples=np.zeros((44100, 2), dtype=np.float64), samplerate=44100)
 Esses erros acontecem cedo, no ponto de criação, e não dentro do callback de
 áudio.
 
-### 4.5. As invariantes
+#### Invariantes
 
 `AudioData` verifica cinco condições em `__post_init__`:
 
@@ -265,7 +258,7 @@ Essas verificações podem ser adicionadas no futuro, mas exigem uma decisão
 explícita: algumas são caras, outras dependem do dispositivo e outras podem ser
 responsabilidade da camada de processamento.
 
-### 4.6. Imutabilidade e `slots`
+#### Imutabilidade e `slots`
 
 `frozen=True` impede a reatribuição dos campos:
 
@@ -294,7 +287,7 @@ audio.novo_campo = 1  # AttributeError
 `slots` não é o mesmo que imutabilidade; são mecanismos diferentes que, juntos,
 tornam o objeto mais previsível e econômico.
 
-### 4.7. Onde ele entra no fluxo
+#### Onde ele entra no fluxo
 
 ```text
 generate_sine ─┐
@@ -310,7 +303,7 @@ load_wav ──────┘
 
 Esse é o principal valor do modelo: ele é o ponto de encontro entre as camadas.
 
-### 4.8. Resumo da API
+#### Resumo da API
 
 ```python
 AudioData(samples: Samples, samplerate: int)
@@ -324,24 +317,14 @@ audio.duration_seconds
 
 A implementação completa está em `src/harmoniac/audio/models.py`.
 
-## 5. Geração de sinal: `generate_sine`
-
-### 5.1. O que é e por que existe
+### 4.2. `generate_sine`
 
 `generate_sine` é um gerador de sinal de teste, não um sintetizador musical.
-Ele existe para produzir áudio conhecido, com frequência, duração e amplitude
-controladas, sem depender de arquivos externos.
+Ele produz áudio conhecido, com frequência, duração e amplitude controladas,
+sem depender de arquivos externos. Isso é útil para validar o player, a leitura
+em blocos e o formato `(frames, canais)`.
 
-Isso é útil para:
-
-- validar o player e o caminho até o dispositivo;
-- testar a leitura em blocos;
-- testar o formato `(frames, canais)`;
-- verificar se o sample rate e a duração estão sendo calculados corretamente.
-
-### 5.2. A fórmula
-
-Para uma senoide de amplitude $A$, frequência $f$ e sample rate $f_s$:
+A fórmula é:
 
 $$
 x[n] = A \sin\left(2\pi f \frac{n}{f_s}\right)
@@ -353,22 +336,16 @@ $$
 N = \text{round}(T f_s)
 $$
 
-onde $T$ é a duração em segundos.
+onde $A$ é a amplitude, $f$ é a frequência, $f_s$ é o sample rate e $T$ é a
+duração em segundos.
 
-O termo $n/f_s$ é o tempo discreto da amostra $n$. O argumento
-$2\pi f n/f_s$ é a fase em radianos. A cada $f_s/f$ amostras, a fase completa
-uma volta de $2\pi$.
+O termo $n/f_s$ é o tempo discreto da amostra $n$. A cada $f_s/f$ amostras, a
+fase completa uma volta de $2\pi$. A 44,1 kHz, uma senoide de 440 Hz tem
+aproximadamente 100,23 amostras por ciclo. Como esse número não é inteiro, o
+último ciclo não termina exatamente em uma amostra; isso é normal em áudio
+digital.
 
-A 44,1 kHz, uma senoide de 440 Hz tem:
-
-$$
-\frac{44100}{440} \approx 100{,}23 \text{ amostras por ciclo}
-$$
-
-Como esse número não é inteiro, o último ciclo não termina exatamente em uma
-amostra. Isso é normal em áudio digital e não é um erro.
-
-### 5.3. Validações
+Validações:
 
 | Parâmetro | Condição | Motivo |
 |---|---|---|
@@ -383,7 +360,7 @@ A validação de Nyquist é particularmente importante. Se `frequency_hz` for
 maior ou igual a `samplerate / 2`, a senoide gerada não representa a frequência
 pedida: ela aparece “dobrada” para uma frequência mais baixa.
 
-### 5.4. Exemplo
+Exemplo:
 
 ```python
 from harmoniac.audio.signal import generate_sine
@@ -406,33 +383,26 @@ O mesmo sinal é replicado nos dois canais. Isso não cria uma imagem estéreo
 entre canais ou conteúdo diferente por canal, será necessário um gerador mais
 avançado.
 
-### 5.5. O que pode dar errado
+Erros comuns:
 
 - **Frequência acima de Nyquist:** `ValueError`. O sinal seria um alias.
 - **Amplitude maior que 1:** `ValueError`. O sinal poderia clipar.
-- **Duração muito curta:** se `round(duration * samplerate) == 0`, o áudio
-  teria zero frames e seria rejeitado.
+- **Duração muito curta:** se `round(duration * samplerate) == 0`, o áudio teria
+  zero frames e seria rejeitado.
 - **Canais zero ou negativos:** `ValueError`.
 - **Sample rate zero ou negativo:** `ValueError`.
 
-## 6. WAV: `load_wav` e `save_wav`
-
-### 6.1. O que é um arquivo WAV
+### 4.3. WAV
 
 WAV é um contêiner do formato RIFF. Ele guarda os metadados necessários para
-interpretar as amostras:
-
-- número de canais;
-- taxa de amostragem;
-- profundidade de bits;
-- formato de codificação (PCM inteiro ou ponto flutuante);
-- os dados amostrados.
+interpretar as amostras: número de canais, taxa de amostragem, profundidade de
+bits, formato de codificação e os dados amostrados.
 
 Na Fase 1, o WAV é usado porque, no nosso caso (PCM/FLOAT), é simples, sem perdas
 e amplamente suportado. Ele não é um formato de distribuição musical eficiente,
 mas é excelente para testes e para armazenar áudio intermediário.
 
-### 6.2. Leitura
+Leitura:
 
 ```python
 def load_wav(path: Path) -> AudioData:
@@ -463,7 +433,7 @@ audio = load_wav(Path("entrada.wav"))
 print(audio.frames, audio.channels, audio.samplerate)
 ```
 
-### 6.3. Escrita
+Escrita:
 
 ```python
 def save_wav(path: Path, data: AudioData, *, subtype: str = "FLOAT") -> None:
@@ -486,7 +456,7 @@ menor e mais compatível, mas introduz quantização de 16 bits. A escolha depen
 do uso: processamento interno pede `FLOAT`; distribuição simples pode pedir
 `PCM_16`.
 
-### 6.4. O que pode dar errado
+Erros comuns:
 
 - **Arquivo inexistente:** `AudioLoadError`.
 - **Arquivo corrompido ou formato não suportado:** `AudioLoadError`.
@@ -496,13 +466,11 @@ do uso: processamento interno pede `FLOAT`; distribuição simples pode pedir
 - **Sample rate não suportado pelo dispositivo:** o arquivo pode ser lido, mas a
   reprodução pode falhar ao abrir o stream.
 
-## 7. Leitura em blocos: `BlockReader`
-
-### 7.1. Por que blocos
+### 4.4. `BlockReader`
 
 O callback de áudio não recebe “o áudio inteiro”. Ele recebe um buffer de
-tamanho fixo e precisa preenchê-lo com o próximo trecho. `BlockReader` é a
-abstração que mantém a posição atual e copia o trecho correto.
+tamanho fixo e precisa preenchê-lo com o próximo trecho. `BlockReader` mantém a
+posição atual e copia o trecho correto.
 
 Separar essa responsabilidade do `AudioPlayer` tem vantagens:
 
@@ -510,26 +478,20 @@ Separar essa responsabilidade do `AudioPlayer` tem vantagens:
 - a lógica de cópia e padding fica em um só lugar;
 - o player não precisa conhecer detalhes de indexação de arrays.
 
-### 7.2. Como funciona
-
-`BlockReader` guarda:
-
-- `_samples`: a matriz completa `(frames, canais)`;
-- `_position`: quantos frames já foram consumidos.
-
-O método `fill(outdata)` executa:
+O leitor guarda a matriz completa `(frames, canais)` e uma posição inteira. O
+método `fill(outdata)`:
 
 1. descobre quantos frames o buffer de saída pede;
 2. calcula quantos frames ainda restam;
 3. se não resta nada, preenche tudo com zero;
 4. caso contrário, copia `min(frames_pedidos, frames_restantes)`;
 5. se o bloco pedido for maior que o restante, preenche o final com zero;
-6. avança `_position` apenas pelos frames realmente copiados.
+6. avança a posição apenas pelos frames realmente copiados.
 
-As propriedades `position` e `finished` expõem o estado. `finished` é
-verdadeiro quando `position >= total de frames`.
+As propriedades `position` e `finished` expõem o estado. `finished` é verdadeiro
+quando a posição alcança o total de frames.
 
-### 7.3. Exemplo
+Exemplo:
 
 ```python
 import numpy as np
@@ -551,38 +513,30 @@ reader.fill(out)
 print(out[:, 0])  # [0. 0. 0.]
 ```
 
-O exemplo mostra o padding: no segundo bloco, só existem dois frames restantes;
-o terceiro é completado com zero. No terceiro bloco, o áudio já terminou e o
-buffer inteiro é silêncio.
+No segundo bloco, só existem dois frames restantes; o terceiro é completado com
+zero. No terceiro bloco, o áudio já terminou e o buffer inteiro é silêncio.
 
-### 7.4. O que pode dar errado
+Erros comuns:
 
-- **`outdata` com número de canais diferente de `samples`:** a atribuição
-  falha ou copia dados incompatíveis.
+- **`outdata` com número de canais diferente de `samples`:** a atribuição falha
+  ou copia dados incompatíveis.
 - **Assumir que todo bloco tem `blocksize` frames:** o último bloco pode ser
   parcial; o padding existe justamente para completar.
 - **Mutar `samples` durante a reprodução:** o leitor guarda uma referência, não
   uma cópia. Alterações no array podem afetar o áudio que ainda será tocado.
 - **Ler `position` esperando precisão de amostra:** a posição avança por bloco.
 
-## 8. Reprodução: `AudioPlayer`
-
-### 8.1. O que é e por que callback
+### 4.5. `AudioPlayer`
 
 `AudioPlayer` controla um stream de saída de áudio. Ele não é um mixer e não
 mistura fontes; nesta fase, ele reproduz um `AudioData` por vez.
 
 A escolha do callback, em vez de `sd.play`, é deliberada. `sd.play` é útil para
 testes rápidos, mas esconde o stream. Com um callback explícito, o Harmoniac
-consegue:
+consegue acompanhar a posição, detectar avisos de underrun/overrun, sinalizar o
+término e preparar o terreno para o mixer da Fase 2.
 
-- acompanhar a posição da reprodução;
-- detectar avisos de underrun/overrun;
-- sinalizar o término de forma controlada;
-- preparar o terreno para o mixer da Fase 2, que precisará somar várias fontes
-  no mesmo bloco.
-
-### 8.2. Ciclo de vida
+O ciclo de vida é:
 
 ```text
 idle ──play()──► playing ──fim do áudio──► finalizado
@@ -595,19 +549,12 @@ idle ──play()──► playing ──fim do áudio──► finalizado
 - **finalizado:** o áudio terminou ou `stop()` foi chamado.
 
 `play(data)` começa chamando `stop()` para encerrar qualquer reprodução
-anterior. Em seguida:
-
-1. cria um `BlockReader` para `data.samples`;
-2. cria um `threading.Event` chamado `finished`;
-3. define o callback;
-4. cria o `OutputStream`;
-5. inicia o stream;
-6. guarda o stream, o leitor e o sample rate sob um lock.
+anterior. Em seguida, cria um `BlockReader`, um `threading.Event` chamado
+`finished`, define o callback, cria o `OutputStream`, inicia o stream e guarda o
+estado sob um lock.
 
 `wait()` bloqueia até o evento `finished` ser sinalizado. `stop()` também
 sinaliza o evento, para e fecha o stream, e limpa o estado.
-
-### 8.3. O callback
 
 O callback roda na thread de áudio do PortAudio. Ele deve ser rápido e não pode
 bloquear. No Harmoniac, ele apenas copia o próximo bloco e verifica o término:
@@ -624,11 +571,9 @@ def callback(outdata, _frames, _time_info, status):
 ```
 
 O argumento `status` indica underrun/overrun. Nesta fase, ele apenas liga um
-flag (`had_status`); não há contagem nem detalhamento.
-
-Quando o áudio termina, o callback sinaliza o evento e levanta
-`sd.CallbackStop`. Essa exceção é a forma que o `sounddevice` usa para encerrar
-o stream a partir do próprio callback.
+flag (`had_status`); não há contagem nem detalhamento. Quando o áudio termina, o
+callback sinaliza o evento e levanta `sd.CallbackStop`, que é a forma que o
+`sounddevice` usa para encerrar o stream a partir do próprio callback.
 
 O callback **não deve**:
 
@@ -640,7 +585,7 @@ O callback **não deve**:
 Se o callback demorar mais que o tempo do bloco, o dispositivo pode sofrer
 underrun e produzir estalos.
 
-### 8.4. API
+API:
 
 | Membro | O que faz |
 |---|---|
@@ -655,22 +600,14 @@ underrun e produzir estalos.
 O construtor aceita `stream_factory`. Nos testes, injetamos um `FakeStream` para
 não abrir o dispositivo real. Em produção, o padrão é `sd.OutputStream`.
 
-### 8.5. Threads e segurança
+Há duas threads principais: a thread principal, que chama `play`, `wait` e
+`stop`, e a thread de áudio, que executa o callback. O player usa um
+`threading.Lock` para proteger o stream, o leitor, o sample rate e o evento
+`finished`. A posição do `BlockReader` é um inteiro lido pela thread principal;
+como só a thread de áudio escreve, a leitura é segura sob o GIL, mas é uma
+fotografia aproximada do estado.
 
-Há duas threads principais:
-
-- a **thread principal**, que chama `play`, `wait` e `stop`;
-- a **thread de áudio**, que executa o callback.
-
-O player usa um `threading.Lock` para proteger o stream, o leitor, o sample rate
-e o evento `finished`. A posição do `BlockReader` é um inteiro lido pela thread
-principal; como só a thread de áudio escreve, a leitura é segura sob o GIL, mas
-é uma fotografia aproximada do estado.
-
-O flag `had_status` é um booleano simples. Ele não é protegido por lock; para um
-indicador de “houve algum aviso”, isso é aceitável nesta fase.
-
-### 8.6. O que pode dar errado
+Erros comuns:
 
 - **Sem dispositivo de saída:** `AudioPlaybackError`.
 - **Falha ao iniciar o stream:** o stream criado é fechado e o erro vira
@@ -681,7 +618,7 @@ indicador de “houve algum aviso”, isso é aceitável nesta fase.
 - **Posição imprecisa:** `position_seconds` avança por bloco e não compensa a
   latência do dispositivo.
 
-## 9. CLI
+## 5. CLI
 
 O CLI é a camada de conveniência. Ele não contém lógica de áudio; apenas
 interpreta argumentos, chama as funções da engine e trata erros.
@@ -721,7 +658,7 @@ from harmoniac.__main__ import main
 main(["--version"])  # imprime a versão e levanta SystemExit(0)
 ```
 
-## 10. Fluxo completo
+## 6. Fluxo de reprodução
 
 ```text
 1. generate_sine() ou load_wav()
@@ -752,46 +689,48 @@ O ponto importante é que o áudio nunca é copiado inteiro para o callback. O
 `AudioData` permanece na memória e o `BlockReader` entrega apenas a janela
 necessária para cada bloco.
 
-## 11. Decisões de projeto
+## 7. Decisões de projeto
 
-### 11.1. Callback em vez de `sd.play`
+### 7.1. Callback em vez de `sd.play`
 
 O callback dá controle sobre posição, status e término. Também é a base para o
 mixer da Fase 2, que precisará somar várias fontes no mesmo bloco.
 
-### 11.2. `float32` como formato interno
+### 7.2. `float32` como formato interno
 
 É o formato nativo do `sounddevice`, evita conversões por bloco e mantém
 precisão suficiente para DSP. A conversão para `PCM_16` fica restrita à
 exportação.
 
-### 11.3. Formato `(frames, canais)`
+### 7.3. Formato `(frames, canais)`
 
 Esse é o formato usado por `sounddevice` e `soundfile`. Ele elimina a ambiguidade
 entre “número de amostras” e “número de frames” em estéreo.
 
-### 11.4. Injeção de `stream_factory`
+### 7.4. Injeção de `stream_factory`
 
 Permite testar `AudioPlayer` sem abrir o dispositivo de áudio. O teste fornece um
 `FakeStream` que registra `start`, `stop`, `close` e expõe o callback.
 
-### 11.5. `blocksize=1024`
+### 7.5. `blocksize=1024`
 
 A 44,1 kHz, 1024 frames correspondem a aproximadamente 23 ms. É um equilíbrio
 razoável entre latência e custo de callback. O valor é configurável.
 
-### 11.6. Exceções específicas
+### 7.6. Exceções específicas
 
 `AudioPlaybackError` e `AudioLoadError` separam falhas de dispositivo das falhas
 de arquivo. O CLI pode tratar cada caso com uma mensagem adequada.
 
-### 11.7. Modelo separado do dispositivo
+### 7.7. Modelo separado do dispositivo
 
 `AudioData` não conhece `sounddevice`. Isso permite testar o modelo e o leitor
 de blocos sem hardware e deixa a porta aberta para outros backends de áudio no
 futuro.
 
-## 12. Testes
+## 8. Testes
+
+### 8.1. Testes automatizados
 
 ```text
 tests/unit/
@@ -821,7 +760,81 @@ A estratégia é testar a maior parte da lógica sem hardware:
 - o player é testado com um stream falso;
 - a reprodução real é validada manualmente, porque depende do dispositivo.
 
-## 13. Validação
+Comando:
+
+```bash
+venv/bin/ruff format --check .
+venv/bin/ruff check .
+venv/bin/pytest
+venv/bin/mypy src
+```
+
+### 8.2. Teste manual
+
+O teste manual valida o que os testes automatizados não conseguem: a saída real
+de áudio no dispositivo e o comportamento do CLI fora do ambiente de teste.
+
+Pré-requisito: estar no diretório raiz do projeto, com o ambiente virtual
+criado e o pacote instalado em modo editável.
+
+1. Verifique a versão e a ajuda:
+
+   ```bash
+   venv/bin/harmoniac --version
+   venv/bin/harmoniac --help
+   ```
+
+   Resultado esperado:
+
+   - `harmoniac 0.1.0`;
+   - ajuda listando os subcomandos `demo` e `play`.
+
+2. Teste a reprodução de uma senoide curta:
+
+   ```bash
+   venv/bin/harmoniac demo --frequency 440 --duration 1 --amplitude 0.1
+   ```
+
+   Resultado esperado: um tom de 440 Hz por cerca de 1 segundo, em volume baixo,
+   e código de saída 0.
+
+3. Gere um WAV e reproduza-o:
+
+   ```bash
+   venv/bin/python - <<'PY'
+   from pathlib import Path
+
+   from harmoniac.audio.signal import generate_sine
+   from harmoniac.audio.wav import save_wav
+
+   path = Path("/tmp/harmoniac_manual.wav")
+   data = generate_sine(440.0, 1.0, 44100, amplitude=0.2, channels=2)
+   save_wav(path, data)
+   print(path)
+   PY
+
+   venv/bin/harmoniac play /tmp/harmoniac_manual.wav
+   ```
+
+   Resultado esperado: o arquivo é criado e o mesmo tom é reproduzido.
+
+4. Teste os caminhos de erro:
+
+   ```bash
+   venv/bin/harmoniac demo --frequency 30000 --samplerate 44100
+   venv/bin/harmoniac play /tmp/arquivo-inexistente.wav
+   ```
+
+   Resultado esperado:
+
+   - o primeiro comando falha com mensagem sobre a frequência de Nyquist e
+     código de saída 2;
+   - o segundo falha com mensagem de erro de arquivo e código de saída 1.
+
+5. Registre o resultado antes de commitar ou mergear. Se algum passo falhar,
+   não avance para o commit.
+
+## 9. Validação
 
 Execução em 2026-10-21, com Python 3.12.3:
 
@@ -861,9 +874,10 @@ harmoniac demo --frequency 440 --duration 0.5 --amplitude 0.1
 harmoniac play /tmp/opencode/harmoniac_teste.wav
 ```
 
-Ambos os comandos terminaram com código 0.
+Ambos os comandos terminaram com código 0. O roteiro da seção 8.2 deve ser
+executado novamente pelo usuário antes do commit e do merge.
 
-## 14. Limitações conhecidas
+## 10. Limitações conhecidas
 
 - **Sem reamostragem:** o sample rate do áudio precisa ser compatível com o
   dispositivo. Não há conversão automática.
@@ -875,8 +889,7 @@ Ambos os comandos terminaram com código 0.
 - **Status agregado:** `had_status` apenas indica que houve algum aviso; não
   conta underruns/overruns.
 - **Teste de hardware manual:** os testes automatizados usam `FakeStream`; a
-  reprodução real foi validada manualmente no dispositivo padrão, mas ainda não
-  faz parte da suíte automatizada.
+  reprodução real precisa ser validada manualmente.
 - **Cobertura parcial do CLI:** os caminhos `demo` e `play` não são exercitados
   por testes automatizados porque dependem de áudio.
 - **`AudioData` não valida amplitude:** valores fora de $[-1, 1]$ são aceitos;
@@ -888,7 +901,7 @@ Ambos os comandos terminaram com código 0.
 - **Sem verificação de contiguidade:** arrays não contíguos podem funcionar ou
   falhar dependendo do backend; não há checagem explícita.
 
-## 15. Próximos passos
+## 11. Próximos passos
 
 1. Adicionar um teste de integração opcional, executado apenas quando houver
    dispositivo de áudio disponível.
@@ -896,23 +909,3 @@ Ambos os comandos terminaram com código 0.
 3. Adicionar seleção de dispositivo e tratamento de sample rate.
 4. Evoluir o `AudioPlayer` para múltiplas fontes no mesmo callback.
 5. Preparar a integração com a UI e o agendamento de eventos.
-
-## 16. Glossário
-
-| Termo | Definição |
-|---|---|
-| Amostra | Valor discreto de amplitude em um instante |
-| Frame | Conjunto de uma amostra por canal |
-| Canal | Via independente de áudio (mono, esquerda, direita etc.) |
-| Sample rate | Quantidade de amostras por segundo, em Hz |
-| Nyquist | Metade do sample rate; limite para evitar aliasing |
-| Aliasing | Frequência acima de Nyquist que aparece dobrada |
-| Buffer | Área de memória que armazena um bloco de áudio |
-| Bloco | Conjunto de frames processado de uma vez |
-| Callback | Função chamada pelo sistema de áudio para pedir novos dados |
-| Underrun | Falta de dados no buffer de saída |
-| Overrun | Excesso de dados no buffer de entrada |
-| PCM | Modulação por código de pulso; no WAV, geralmente amostras inteiras |
-| `float32` | Ponto flutuante de 32 bits usado internamente |
-| Latência | Atraso entre o pedido e a saída efetiva do som |
-| Stream | Fluxo contínuo de áudio aberto no dispositivo |
