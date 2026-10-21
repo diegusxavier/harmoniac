@@ -4,13 +4,14 @@ Treinador musical de precisão com sincronização orientada a eventos. O Harmon
 exibe letra e acordes alinhados ao áudio e acende cada evento no instante exato da
 música, funcionando como um "Cifra Club inteligente".
 
-> **Status:** Fase 0 — fundação do projeto. Ainda não há áudio, UI ou IA implementados.
+> **Status:** Fase 1 — engine de áudio. Reprodução, geração de senoide e leitura
+> de WAV funcionam; ainda não há UI, mixer ou IA implementados.
 
 ## Stack
 
 - Python 3.10+
 - NumPy, SciPy e librosa (DSP e análise musical)
-- sounddevice (reprodução de áudio)
+- sounddevice e soundfile (reprodução e leitura/escrita de WAV)
 - PyQt6 (interface gráfica)
 - Demucs e Whisper (separação de stems e alinhamento de letras)
 - LyricsGenius / Vagalume (obtenção de letras)
@@ -50,6 +51,17 @@ uv sync --extra dev
 O `pyproject.toml` é a fonte única de verdade das dependências. Não utilizamos
 `requirements.txt`.
 
+## Uso rápido
+
+```bash
+harmoniac --version
+harmoniac demo --frequency 440 --duration 3
+harmoniac play caminho/para/arquivo.wav
+```
+
+`demo` gera uma senoide e a reproduz no dispositivo padrão. `play` carrega um
+arquivo WAV e o reproduz. A reprodução depende de uma saída de áudio disponível.
+
 ## Testes e qualidade
 
 ```bash
@@ -61,8 +73,8 @@ mypy src
 
 ## Roadmap
 
-1. Fundação do projeto (Fase 0)
-2. Engine de áudio LTI
+1. Fundação do projeto (Fase 0) — concluída
+2. Engine de áudio LTI (Fase 1) — concluída
 3. Mixer multicanal e Clear Tracks
 4. UI básica e multithreading
 5. BPM e metrônomo
