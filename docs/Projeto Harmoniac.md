@@ -40,6 +40,7 @@ Aqui, tenho listado ferramentas que não foram escolhidas por mim, pois não sab
   * `Whisper` (OpenAI) para timestamping e alinhamento forçado (Karaokê).
 * **Interface Gráfica (UI):** `PyQt6` (Multithreading robusto com `QThread`).
 * **APIs de Letras:** `LyricsGenius` ou `Vagalume API`.
+* **Qualidade / Desenvolvimento:** `pytest`, `pytest-cov`, `ruff`, `mypy`.
 
 ## 4. Arquitetura do Sistema e Fluxo de Dados (MVC Expandido)
 
@@ -82,15 +83,24 @@ Usaremos commits convencionais (ex: `feat:`, `fix:`) e o modelo Git Flow: `main`
 ```text
 harmoniac/
 ├── docs/                     # Documentação do projeto
+│   ├── engenharia/           # Documentação de código e decisões técnicas
+│   ├── decisoes/             # ADRs (Architecture Decision Records)
+│   └── teoria/               # Notas teóricas didáticas (Markdown/LaTeX)
 ├── src/
-│   ├── core/                 # JSON Models, Data Classes
-│   ├── dsp/                  # DSP Analyzer, BPM, Whisper Sync
-│   ├── audio/                # Player, Mixer, Clear Tracks logic
-│   └── ui/                   # Telas PyQt6
+│   └── harmoniac/
+│       ├── core/             # JSON Models, Data Classes
+│       ├── dsp/              # DSP Analyzer, BPM, Whisper Sync
+│       ├── audio/            # Player, Mixer, Clear Tracks logic
+│       └── ui/               # Telas PyQt6
 ├── assets/                   # Ícones e bips (.wav)
 ├── data/                     # Workspace local (Stems)
-└── requirements.txt
+├── tests/                    # Testes automatizados
+└── pyproject.toml            # Dependências, build e ferramentas
 ```
+
+> **Decisão registrada:** o gerenciamento de dependências foi migrado de
+> `requirements.txt` para `pyproject.toml`. Consulte
+> `docs/decisoes/0001-gerenciamento-de-dependencias.md`.
 
 ## 7. Roadmap de Implementação (Fases)
 
