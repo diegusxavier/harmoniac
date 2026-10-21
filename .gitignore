@@ -1,2 +1,6 @@
 # Agentes de IA
 .opencode/
+
+# Archivos de configuracão
+*.env
+venv/
