@@ -1,6 +1,47 @@
 # Agentes de IA
 .opencode/
 
-# Archivos de configuracão
-*.env
+# Ambientes virtuais
+.venv/
 venv/
+env/
+
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Empacotamento
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Testes e cobertura
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Ferramentas de qualidade
+.mypy_cache/
+.ruff_cache/
+
+# Workspace local (stems e cache)
+data/*
+!data/.gitkeep
+
+# Variáveis de ambiente e segredos
+.env
+.env.*
+!.env.example
+
+# Sistema operacional e editores
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# uv (se adotado futuramente, uv.lock deve ser versionado)
+# uv.lock
